@@ -41,7 +41,10 @@ def get_candles(limit=20):
     r = requests.get(BYBIT_URL, params={
         "category": "linear", "symbol": "BTCUSDT", "interval": "5", "limit": limit
     }, proxies=PROXIES, timeout=15)
-    data = r.json()
+    try:
+        data = r.json()
+    except ValueError:
+        raise ValueError(f"non-JSON from bybit (status {r.status_code}): {r.text[:300]!r}")
     rows = data.get("result", {}).get("list")
     if not rows:
         raise ValueError(f"no candle data: {data.get('retMsg', data)}")
@@ -68,13 +71,19 @@ def window_ts(ts=None):
 def get_market(win_ts):
     slug = f"btc-updown-5m-{win_ts}"
     r = requests.get(GAMMA_URL, params={"slug": slug}, proxies=PROXIES, timeout=15)
-    data = r.json()
+    try:
+        data = r.json()
+    except ValueError:
+        raise ValueError(f"non-JSON from polymarket gamma (status {r.status_code}): {r.text[:300]!r}")
     return data[0] if data else None
 
 
 def get_token_price(token_id):
     r = requests.get(f"{CLOB_URL}/price", params={"token_id": token_id, "side": "buy"}, proxies=PROXIES, timeout=15)
-    return float(r.json().get("price", 0.5))
+    try:
+        return float(r.json().get("price", 0.5))
+    except ValueError:
+        raise ValueError(f"non-JSON from polymarket clob (status {r.status_code}): {r.text[:300]!r}")
 
 
 def enter_trade(records):
