@@ -108,6 +108,13 @@ def enter_trade(records):
     token_id = tokens[idx]
     entry_price = get_token_price(token_id)
 
+    if not (0 < entry_price < 1):
+        # No real two-sided quote (e.g. CLOB returns 0 for an illiquid/just-listed
+        # market) -- entering here would later blow up resolve_pending with a
+        # division by zero if this "trade" somehow resolves as a win.
+        print(f"degenerate entry_price={entry_price} for window {now_win}, skipping")
+        return
+
     trade = {
         "window_ts": now_win,
         "signal_n": SIGNAL_N,
@@ -134,25 +141,31 @@ def resolve_pending(records):
         try:
             resolved = get_market(r["window_ts"])
             outcome_prices = [float(x) for x in json.loads(resolved.get("outcomePrices", '["0.5","0.5"]'))]
+            idx = r["outcome_idx"]
+            won = outcome_prices[idx] > 0.5
+            entry_price = r["entry_price"]
+            payout = STAKE / entry_price if won and entry_price > 0 else 0.0
+            pnl = round(payout - STAKE, 4) if won else -STAKE
+            r.update({
+                "won": won,
+                "outcome_prices": outcome_prices,
+                "pnl": pnl,
+                "resolved_at": datetime.now(timezone.utc).isoformat(),
+            })
+            print(f"resolved window {r['window_ts']}: {'WIN' if won else 'LOSS'}, pnl ${pnl:.2f}")
         except Exception as e:
-            print(f"resolve failed for window {r['window_ts']}: {e}")
+            # One bad record must never take down the whole cron run -- that
+            # would repeat every 5 minutes forever with nobody around to fix it.
+            print(f"resolve failed for window {r.get('window_ts')}: {e}")
             continue
-        idx = r["outcome_idx"]
-        won = outcome_prices[idx] > 0.5
-        payout = STAKE / r["entry_price"] if won else 0.0
-        pnl = round(payout - STAKE, 4) if won else -STAKE
-        r.update({
-            "won": won,
-            "outcome_prices": outcome_prices,
-            "pnl": pnl,
-            "resolved_at": datetime.now(timezone.utc).isoformat(),
-        })
-        print(f"resolved window {r['window_ts']}: {'WIN' if won else 'LOSS'}, pnl ${pnl:.2f}")
 
 
 def main():
     records = load_records()
-    resolve_pending(records)
+    try:
+        resolve_pending(records)
+    except Exception as e:
+        print("resolve_pending error:", e)
     try:
         enter_trade(records)
     except Exception as e:
