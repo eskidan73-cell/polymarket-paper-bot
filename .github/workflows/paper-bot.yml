@@ -24,6 +24,19 @@ jobs:
 
       - run: pip install requests
 
+      - name: Debug Polymarket connectivity
+        run: |
+          python -c "
+          import polymarket_paper_bot as b
+          w = b.window_ts()
+          m = b.get_market(w)
+          print('market found:', bool(m), m.get('slug') if m else None)
+          if m:
+              import json
+              tokens = json.loads(m['clobTokenIds'])
+              print('price ok:', b.get_token_price(tokens[0]))
+          "
+
       - run: python polymarket_paper_bot.py
 
       - name: Commit and push log
