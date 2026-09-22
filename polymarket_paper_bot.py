@@ -1,7 +1,7 @@
 import requests, time, json, os
 from datetime import datetime, timezone
 
-BYBIT_URL = "https://api.bybit.com/v5/market/kline"
+CANDLES_URL = "https://api.exchange.coinbase.com/products/BTC-USD/candles"
 GAMMA_URL = "https://gamma-api.polymarket.com/markets"
 CLOB_URL = "https://clob.polymarket.com"
 
@@ -38,18 +38,16 @@ def save_records(records):
 
 
 def get_candles(limit=20):
-    r = requests.get(BYBIT_URL, params={
-        "category": "linear", "symbol": "BTCUSDT", "interval": "5", "limit": limit
-    }, proxies=PROXIES, timeout=15)
+    r = requests.get(CANDLES_URL, params={"granularity": 300}, proxies=PROXIES, timeout=15)
     try:
         data = r.json()
     except ValueError:
-        raise ValueError(f"non-JSON from bybit (status {r.status_code}): {r.text[:300]!r}")
-    rows = data.get("result", {}).get("list")
-    if not rows:
-        raise ValueError(f"no candle data: {data.get('retMsg', data)}")
-    rows = sorted(rows, key=lambda x: int(x[0]))
-    return [(int(x[0]), float(x[1]), float(x[4])) for x in rows]
+        raise ValueError(f"non-JSON from coinbase (status {r.status_code}): {r.text[:300]!r}")
+    if not data:
+        raise ValueError(f"no candle data: {data}")
+    # each row: [time, low, high, open, close, volume], most recent first
+    rows = sorted(data, key=lambda x: int(x[0]))[-limit:]
+    return [(int(x[0]), float(x[3]), float(x[4])) for x in rows]
 
 
 def compute_signal(candles, n=SIGNAL_N):
