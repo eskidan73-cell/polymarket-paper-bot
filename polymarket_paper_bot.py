@@ -67,12 +67,24 @@ def window_ts(ts=None):
 
 
 def get_market(win_ts):
+    """
+    Найдено на живых данных: Gamma по умолчанию скрывает уже закрытые рынки
+    из ответа на ?slug=... (ведёт себя как closed=false), поэтому резолв
+    после закрытия окна молча не находил рынок и сделка вечно висела
+    pending. Если обычный запрос пуст — повторяем с closed=true.
+    """
     slug = f"btc-updown-5m-{win_ts}"
     r = requests.get(GAMMA_URL, params={"slug": slug}, proxies=PROXIES, timeout=15)
     try:
         data = r.json()
     except ValueError:
         raise ValueError(f"non-JSON from polymarket gamma (status {r.status_code}): {r.text[:300]!r}")
+    if not data:
+        r = requests.get(GAMMA_URL, params={"slug": slug, "closed": "true"}, proxies=PROXIES, timeout=15)
+        try:
+            data = r.json()
+        except ValueError:
+            raise ValueError(f"non-JSON from polymarket gamma (status {r.status_code}): {r.text[:300]!r}")
     return data[0] if data else None
 
 
