@@ -1,2 +1,6 @@
 __pycache__/
 *.pyc
+candles_5m.csv
+pm_entry_cache.json
+streak_out.txt
+entry_out.txt
