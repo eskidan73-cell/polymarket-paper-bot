@@ -10,14 +10,21 @@ STAKE = 10.0
 RESOLVE_BUFFER = 60  # seconds after window close before trusting the resolved price
 LOG_FILE = os.environ.get("LOG_FILE", "paper_trades.jsonl")
 
+# Отдельный виртуальный счёт: только входы дороже MIN_ENTRY. Порог подобран
+# по старой истории (подгонка), поэтому счёт ведётся с даты запуска как
+# честная проверка на новых данных; pnl_fee учитывает комиссию рынка.
+FILTERED_LOG_FILE = os.environ.get("FILTERED_LOG_FILE", "paper_trades_filtered.jsonl")
+MIN_ENTRY = 0.45
+FEE_RATE = 0.07  # feeSchedule рынков btc-updown-5m: fee = rate * p * (1-p), доля ставки
+
 _PROXY = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY")
 PROXIES = {"http": _PROXY, "https": _PROXY} if _PROXY else None
 
 
-def load_records():
+def load_records(path=None):
     records = []
     try:
-        with open(LOG_FILE, encoding="utf-8") as f:
+        with open(path or LOG_FILE, encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -31,8 +38,8 @@ def load_records():
     return records
 
 
-def save_records(records):
-    with open(LOG_FILE, "w", encoding="utf-8") as f:
+def save_records(records, path=None):
+    with open(path or LOG_FILE, "w", encoding="utf-8") as f:
         for r in records:
             f.write(json.dumps(r) + "\n")
 
@@ -100,19 +107,19 @@ def enter_trade(records):
     now_win = window_ts()
     if any(r["window_ts"] == now_win for r in records):
         print(f"window {now_win} already recorded, skip entry")
-        return
+        return None
 
     candles = get_candles(limit=SIGNAL_N + 5)
     signal = compute_signal(candles)
     if signal is None:
         print(f"{datetime.now(timezone.utc)}: no signal for window {now_win}")
-        return
+        return None
 
     direction = "Up" if signal == 1 else "Down"
     market = get_market(now_win)
     if not market:
         print(f"no market for window {now_win}, skipping")
-        return
+        return None
 
     tokens = json.loads(market["clobTokenIds"])
     outcomes = json.loads(market["outcomes"])
@@ -125,7 +132,7 @@ def enter_trade(records):
         # market) -- entering here would later blow up resolve_pending with a
         # division by zero if this "trade" somehow resolves as a win.
         print(f"degenerate entry_price={entry_price} for window {now_win}, skipping")
-        return
+        return None
 
     trade = {
         "window_ts": now_win,
@@ -141,6 +148,7 @@ def enter_trade(records):
     }
     records.append(trade)
     print(f"entered {direction} @ {entry_price:.3f} (window {now_win})")
+    return trade
 
 
 def resolve_pending(records):
@@ -158,7 +166,9 @@ def resolve_pending(records):
             entry_price = r["entry_price"]
             payout = STAKE / entry_price if won and entry_price > 0 else 0.0
             pnl = round(payout - STAKE, 4) if won else -STAKE
+            fee = STAKE * FEE_RATE * entry_price * (1 - entry_price)
             r.update({
+                "pnl_fee": round(pnl - fee, 4),
                 "won": won,
                 "outcome_prices": outcome_prices,
                 "pnl": pnl,
@@ -174,15 +184,21 @@ def resolve_pending(records):
 
 def main():
     records = load_records()
+    filtered = load_records(FILTERED_LOG_FILE)
+    for recs in (records, filtered):
+        try:
+            resolve_pending(recs)
+        except Exception as e:
+            print("resolve_pending error:", e)
+    trade = None
     try:
-        resolve_pending(records)
-    except Exception as e:
-        print("resolve_pending error:", e)
-    try:
-        enter_trade(records)
+        trade = enter_trade(records)
     except Exception as e:
         print("entry error:", e)
+    if trade and trade["entry_price"] > MIN_ENTRY:
+        filtered.append(dict(trade))
     save_records(records)
+    save_records(filtered, FILTERED_LOG_FILE)
 
 
 if __name__ == "__main__":

@@ -30,7 +30,7 @@ jobs:
         run: |
           git config user.name "paper-bot"
           git config user.email "paper-bot@users.noreply.github.com"
-          git add paper_trades.jsonl
+          git add paper_trades.jsonl paper_trades_filtered.jsonl
           git diff --cached --quiet || git commit -m "update paper trades log"
           git pull --rebase origin main
           git push
